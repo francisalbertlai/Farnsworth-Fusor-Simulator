@@ -1,0 +1,343 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<title>Fusor Simulator v0</title>
+<style>
+  :root {
+    --bg: #0b0e14; --panel: #131826; --line: #232b3d;
+    --text: #dde3f0; --dim: #8a93a8; --accent: #5eb1ff;
+    --ion: #6fb7ff; --fusion: #ffd166; --neutron: #64ffda; --grid: #ff6b6b;
+  }
+  * { box-sizing: border-box; margin: 0; padding: 0; }
+  body { background: var(--bg); color: var(--text); font-family: "Segoe UI", system-ui, sans-serif; padding: 18px; }
+  h1 { font-size: 20px; font-weight: 600; }
+  .sub { color: var(--dim); font-size: 13px; margin: 4px 0 14px; }
+  .wrap { display: flex; gap: 16px; flex-wrap: wrap; }
+  .left { flex: 1 1 520px; min-width: 380px; }
+  .right { flex: 0 0 360px; display: flex; flex-direction: column; gap: 12px; }
+  canvas#chamber { width: 100%; background: #05070c; border: 1px solid var(--line); border-radius: 10px; }
+  .card { background: var(--panel); border: 1px solid var(--line); border-radius: 10px; padding: 14px; }
+  .card h2 { font-size: 13px; text-transform: uppercase; letter-spacing: .08em; color: var(--dim); margin-bottom: 10px; }
+  .ctl { margin-bottom: 10px; }
+  .ctl label { display: flex; justify-content: space-between; font-size: 13px; margin-bottom: 3px; }
+  .ctl label .val { color: var(--accent); font-variant-numeric: tabular-nums; }
+  input[type=range] { width: 100%; accent-color: var(--accent); }
+  select { width: 100%; background: #0e1320; color: var(--text); border: 1px solid var(--line); border-radius: 6px; padding: 6px; font-size: 14px; }
+  table.readout { width: 100%; border-collapse: collapse; font-size: 13px; }
+  table.readout td { padding: 4px 0; border-bottom: 1px solid var(--line); }
+  table.readout td:last-child { text-align: right; color: var(--accent); font-variant-numeric: tabular-nums; }
+  .big { font-size: 22px; font-weight: 700; color: var(--fusion); }
+  .qline { font-size: 12px; color: var(--dim); margin-top: 6px; }
+  #gauge { width: 100%; height: 14px; background: #0e1320; border-radius: 7px; overflow: hidden; margin-top: 8px; border: 1px solid var(--line); }
+  #gaugeFill { height: 100%; width: 0%; background: linear-gradient(90deg, #2b6cb0, var(--fusion)); transition: width .2s; }
+  .gauge-labels { display: flex; justify-content: space-between; font-size: 10px; color: var(--dim); margin-top: 2px; }
+  canvas#xsplot { width: 100%; background: #05070c; border: 1px solid var(--line); border-radius: 8px; }
+  .notes { font-size: 12px; color: var(--dim); line-height: 1.5; }
+  .notes b { color: var(--text); }
+  .legend { display: flex; gap: 14px; font-size: 12px; color: var(--dim); margin-top: 6px; flex-wrap: wrap; }
+  .dot { display: inline-block; width: 8px; height: 8px; border-radius: 50%; margin-right: 4px; }
+  .warn { color: #ffb4a2; }
+  .info { position: relative; display: inline-block; width: 14px; height: 14px; border: 1px solid var(--dim); border-radius: 50%; color: var(--dim); font-size: 9px; line-height: 13px; text-align: center; cursor: help; font-style: italic; font-weight: 600; vertical-align: 1px; }
+  .info .tip { visibility: hidden; opacity: 0; position: absolute; bottom: 145%; left: -8px; width: 225px; background: #1b2336; border: 1px solid #34405c; color: var(--text); font-size: 11.5px; line-height: 1.5; padding: 8px 10px; border-radius: 8px; z-index: 10; transition: opacity .15s; pointer-events: none; font-weight: 400; font-style: normal; text-align: left; box-shadow: 0 6px 18px rgba(0,0,0,.5); }
+  .info.r .tip { left: auto; right: -8px; }
+  .info:hover .tip { visibility: visible; opacity: 1; }
+  .info .tip b { color: var(--accent); }
+</style>
+</head>
+<body>
+<h1>Farnsworth Fusor Simulator <span style="color:var(--dim);font-weight:400">v0</span></h1>
+<div class="sub">Beam-on-background-gas model &middot; NRL Plasma Formulary cross-sections &middot; idealized (see assumptions)</div>
+
+<div class="wrap">
+  <div class="left">
+    <canvas id="chamber" width="640" height="640"></canvas>
+    <div class="legend">
+      <span><span class="dot" style="background:var(--ion)"></span>deuteron (ion)</span>
+      <span><span class="dot" style="background:var(--fusion)"></span>fusion event</span>
+      <span><span class="dot" style="background:var(--neutron)"></span>neutron (ignores fields — flies straight out)</span>
+      <span><span class="dot" style="background:var(--grid)"></span>ion lost to grid</span>
+    </div>
+  </div>
+
+  <div class="right">
+    <div class="card">
+      <h2>Fuel &amp; Drive</h2>
+      <div class="ctl">
+        <label><span>Fuel <span class="info">i<span class="tip"><b>What's colliding.</b> D–D is what real fusors run — deuterium is cheap and legal. D–T reacts ~100–1000× more easily (it's what power plants plan to use) but tritium is radioactive and restricted. D–³He releases its energy in charged particles instead of neutrons, but needs much higher energy and ³He is extremely scarce.</span></span></span></label>
+        <select id="fuel">
+          <option value="DD" selected>D–D (deuterium gas — what real fusors use)</option>
+          <option value="DT">D–T (50/50 — tritium: restricted, hypothetical)</option>
+          <option value="DHe3">D–³He (50/50 — mostly aneutronic)</option>
+        </select>
+      </div>
+      <div class="ctl"><label><span>Grid voltage <span class="info">i<span class="tip"><b>The most powerful knob.</b> The negative voltage on the inner grid sets each ion's impact energy (40 kV → 40 keV). Fusion probability rises near-exponentially with it, because faster ions quantum-tunnel through the nuclei's electric repulsion more easily. Real amateur fusors run 20–50 kV; above ~60 kV, X-ray shielding gets serious.</span></span></span> <span class="val" id="vVal"></span></label>
+        <input type="range" id="voltage" min="5" max="200" step="1" value="40"></div>
+      <div class="ctl"><label><span>Ion current <span class="info">i<span class="tip"><b>How many ions per second</b> fall into the well — 10 mA ≈ 6×10¹⁶ deuterons/s. Output scales linearly with it, but so does input power, so it does nothing for Q. It's a volume knob, not an efficiency knob.</span></span></span> <span class="val" id="iVal"></span></label>
+        <input type="range" id="current" min="1" max="50" step="1" value="10"></div>
+      <div class="ctl"><label><span>Gas pressure <span class="info">i<span class="tip"><b>Target density.</b> More gas = more nuclei to hit = linearly more fusion (in this model). The real trade-off v0 ignores: too much gas and ions collide with neutrals before reaching full speed (charge exchange), killing their energy — that's part of the ×0.2 fudge factor. Real fusors tune this carefully, ~1–10 mTorr.</span></span></span> <span class="val" id="pVal"></span></label>
+        <input type="range" id="pressure" min="0.5" max="20" step="0.5" value="5"></div>
+    </div>
+
+    <div class="card">
+      <h2>Geometry</h2>
+      <div class="ctl"><label><span>Chamber radius <span class="info">i<span class="tip"><b>Path length through the gas.</b> A bigger chamber means each ion pass sweeps through more target nuclei — linear gain in this model. In reality the benefit is weaker: bigger chambers need bigger vacuum pumps and the ion beam defocuses over distance.</span></span></span> <span class="val" id="rVal"></span></label>
+        <input type="range" id="radius" min="5" max="40" step="1" value="15"></div>
+      <div class="ctl"><label><span>Cathode radius <span class="info r">i<span class="tip"><b>Honest limit of v0:</b> this slider is currently visual only. In a real fusor the grid's size shapes the electric field and how tightly ions focus at the core — modeling that properly needs a real field solver, which is the v1 upgrade.</span></span></span> <span class="val" id="rcVal"></span></label>
+        <input type="range" id="cathode" min="10" max="50" step="1" value="25"></div>
+      <div class="ctl"><label><span>Grid transparency <span class="info r">i<span class="tip"><b>The fusor's fatal flaw.</b> The inner grid is wire mesh; this is the fraction that's open space. Each pass, ions risk dying on a wire. At 95%, an ion survives ~10 passes; at 98%, ~25 — more passes, more chances to fuse. Grid losses are why "grid-less" concepts (like the Polywell) were invented — and why they failed differently.</span></span></span> <span class="val" id="tVal"></span></label>
+        <input type="range" id="transparency" min="80" max="98" step="0.5" value="95"></div>
+    </div>
+
+    <div class="card">
+      <h2>Output</h2>
+      <div>Neutron rate <span class="info">i<span class="tip"><b>The fusor's product.</b> D–D fusion spits out 2.45 MeV neutrons; being neutral, they ignore all fields and fly straight out through the chamber wall. They're what you'd actually measure to prove fusion is happening — a good amateur fusor does 10⁵–10⁷ n/s.</span></span>: <span class="big" id="neutrons">–</span> <span style="color:var(--dim)">n/s</span></div>
+      <div id="gauge"><div id="gaugeFill"></div></div>
+      <div class="gauge-labels"><span>10³</span><span>10⁵</span><span>10⁷</span><span>10⁹</span><span>10¹¹</span></div>
+      <table class="readout" style="margin-top:10px">
+        <tr><td>Fusion reactions <span class="info">i<span class="tip"><b>All fusion events per second.</b> In D–D, only about half produce a neutron — the other branch makes tritium + a proton. (Amateur fusors literally breed trace tritium; the amounts are utterly negligible.)</span></span></td><td id="fusions">–</td></tr>
+        <tr><td>Fusion probability per ion <span class="info r">i<span class="tip"><b>The core problem, in one number.</b> The chance a single ion fuses before it dies on the grid — typically 1 in a million or worse. Every ion that doesn't fuse still cost you full acceleration energy. This ratio is fundamentally why fusors can't break even.</span></span></td><td id="prob">–</td></tr>
+        <tr><td>Cross-section at ion energy <span class="info r">i<span class="tip"><b>How big a target each nucleus is,</b> measured in barns (10⁻²⁸ m² — physicist humor: "big as a barn"). It grows steeply with energy because faster ions tunnel through the electric repulsion between nuclei more easily. Compare it on the chart below.</span></span></td><td id="sigma">–</td></tr>
+        <tr><td>Input power <span class="info">i<span class="tip"><b>V × I — what the power supply burns.</b> Nearly all of it ends up as heat in the grid and X-rays from the chamber, not fusion.</span></span></td><td id="pin">–</td></tr>
+        <tr><td>Fusion power <span class="info">i<span class="tip"><b>Energy released by fusion per second.</b> Reactions/s × energy per reaction (3.65 MeV avg for D–D, 17.6 MeV for D–T). Compare it to input power and weep.</span></span></td><td id="pfus">–</td></tr>
+        <tr><td><b>Q</b> (fusion / input power) <span class="info r">i<span class="tip"><b>The number all of fusion chases.</b> Q > 1 means more fusion energy out than electrical energy in. ITER targets Q = 10; NIF briefly hit Q ≈ 1.5 (by its own accounting); fusors live around 10⁻⁸. The gains and losses scale with the same knobs — that's the trap.</span></span></td><td id="q">–</td></tr>
+      </table>
+      <div class="qline" id="qComment"></div>
+    </div>
+
+    <div class="card">
+      <h2>Cross-section vs energy</h2>
+      <canvas id="xsplot" width="330" height="160"></canvas>
+    </div>
+
+    <div class="card notes">
+      <h2>Assumptions (v0 — honest list)</h2>
+      <b>Idealized beam-target model.</b> All ions assumed to reach full grid voltage; real fusors lose most ion energy to charge exchange — real rates run ~5–50× below ideal, so a flat ×0.2 degradation factor is applied.
+      No space charge, no beam–beam fusion, ideal spherical symmetry, monoenergetic ions. Particle motion on screen is illustrative (not to physical timescale); the numbers panel is the actual model.
+      Cross-sections: Duane coefficients, NRL Plasma Formulary. <span class="warn">D–T shown for physics comparison only — tritium is not obtainable for amateur devices, and no fusor of any design reaches net energy.</span>
+    </div>
+  </div>
+</div>
+
+<script>
+"use strict";
+// ---------- Physics ----------
+const EV = 1.602176634e-19, KB = 1.380649e-23, T_GAS = 293;
+const DEGRADE = 0.2; // charge-exchange / incomplete-acceleration fudge (disclosed)
+
+// Duane beam-target fits: sigma(E_lab keV) in barns
+function duane(E, A) {
+  if (E <= 0.5) return 0;
+  const [A1, A2, A3, A4, A5] = A;
+  return (A5 + A2 / (Math.pow(A4 - A3 * E, 2) + 1)) / (E * (Math.exp(A1 / Math.sqrt(E)) - 1));
+}
+const XS = {
+  DDn:  [47.88, 482, 3.08e-4, 1.177, 0],      // D(d,n)3He
+  DDp:  [46.097, 372, 4.36e-4, 1.22, 0],      // D(d,p)T
+  DT:   [45.95, 50200, 1.368e-2, 1.076, 409], // T(d,n)4He
+  DHe3: [89.27, 25900, 3.98e-3, 1.297, 647],  // 3He(d,p)4He
+};
+
+// state
+const S = { fuel: "DD", V: 40, I: 10, P: 5, R: 15, rcPct: 25, trans: 95 };
+
+function computePhysics() {
+  const E = S.V;                               // keV (lab)
+  const P_pa = S.P * 0.13332;                  // mTorr -> Pa
+  const nMol = P_pa / (KB * T_GAS);            // molecules/m3
+  const ionRate = (S.I / 1000) / EV;           // ions/s
+  const passes = Math.min(1 / (2 * (1 - S.trans / 100)), 50);
+  const L = passes * 2 * (S.R / 100);          // m
+  const kBase = ionRate * L * DEGRADE * 1e-28; // barns -> m^2 folded in
+
+  const sDDn = duane(E, XS.DDn), sDDp = duane(E, XS.DDp);
+  let fus = 0, neut = 0, sigmaShown = 0, ePerReaction = 0; // MeV
+  if (S.fuel === "DD") {
+    const nD = 2 * nMol;                       // D2 -> 2 atoms
+    fus = kBase * nD * (sDDn + sDDp);
+    neut = kBase * nD * sDDn;
+    sigmaShown = sDDn + sDDp; ePerReaction = 3.65;
+  } else if (S.fuel === "DT") {
+    const nT = nMol;                           // 50/50 atomic mix: half targets are T
+    const sDT = duane(E, XS.DT);
+    fus = kBase * nT * sDT;
+    neut = fus;                                // 1 neutron (14.1 MeV) per D-T
+    sigmaShown = sDT; ePerReaction = 17.6;
+  } else {
+    const nHe3 = nMol, nD = nMol;              // 50/50 mix
+    const sHe3 = duane(E, XS.DHe3);
+    fus = kBase * nHe3 * sHe3;
+    neut = kBase * nD * sDDn;                  // neutrons only from D-D side reactions
+    sigmaShown = sHe3; ePerReaction = 18.3;
+  }
+  const pin = (S.I / 1000) * S.V * 1000;       // W
+  const pfus = fus * ePerReaction * 1e6 * EV;  // W
+  return { fus, neut, sigmaShown, pin, pfus, q: pfus / pin, probPerIon: fus / ionRate };
+}
+
+// ---------- Formatting ----------
+function sci(x, d = 2) {
+  if (!isFinite(x) || x <= 0) return "0";
+  const e = Math.floor(Math.log10(x)), m = x / Math.pow(10, e);
+  const sup = String(e).replace(/-/g, "⁻").replace(/\d/g, c => "⁰¹²³⁴⁵⁶⁷⁸⁹"[c]);
+  return m.toFixed(d) + "×10" + sup;
+}
+
+// ---------- UI helpers ----------
+const $ = id => document.getElementById(id);
+
+let PHY = computePhysics();
+function refresh() {
+  PHY = computePhysics();
+  $("neutrons").textContent = sci(PHY.neut);
+  $("fusions").textContent = sci(PHY.fus) + " /s";
+  $("prob").textContent = sci(PHY.probPerIon);
+  $("sigma").textContent = sci(PHY.sigmaShown, 2) + " b";
+  $("pin").textContent = PHY.pin.toFixed(0) + " W";
+  $("pfus").textContent = sci(PHY.pfus) + " W";
+  $("q").textContent = sci(PHY.q);
+  $("qComment").textContent = PHY.q > 0 ?
+    "Net energy needs Q > 1. You are " + sci(1 / PHY.q, 1) + "× away — this gap is why fusors are neutron sources, not power plants." : "";
+  const lg = Math.log10(Math.max(PHY.neut, 1));
+  $("gaugeFill").style.width = Math.max(0, Math.min(100, (lg - 3) / 8 * 100)) + "%";
+  drawXS();
+}
+
+// ---------- Cross-section plot ----------
+const xs = $("xsplot"), xctx = xs.getContext("2d");
+function drawXS() {
+  const w = xs.width, h = xs.height, padL = 34, padB = 18, padT = 8, padR = 6;
+  xctx.clearRect(0, 0, w, h);
+  const emin = 5, emax = 200, smin = 1e-6, smax = 10;
+  const X = E => padL + (E - emin) / (emax - emin) * (w - padL - padR);
+  const Y = s => h - padB - (Math.log10(Math.max(s, smin)) - Math.log10(smin)) / (Math.log10(smax) - Math.log10(smin)) * (h - padB - padT);
+  xctx.strokeStyle = "#232b3d"; xctx.fillStyle = "#8a93a8"; xctx.font = "9px sans-serif"; xctx.lineWidth = 1;
+  for (let e10 = -6; e10 <= 1; e10 += 2) {
+    const y = Y(Math.pow(10, e10));
+    xctx.beginPath(); xctx.moveTo(padL, y); xctx.lineTo(w - padR, y); xctx.stroke();
+    xctx.fillText("10" + (e10 === 0 ? "⁰" : String(e10).replace("-", "⁻").replace(/\d/g, c => "⁰¹²³⁴⁵⁶⁷⁸⁹"[c])) + " b", 2, y + 3);
+  }
+  for (const E of [50, 100, 150, 200]) xctx.fillText(E + " keV", X(E) - 14, h - 5);
+  const key = S.fuel === "DD" ? null : (S.fuel === "DT" ? XS.DT : XS.DHe3);
+  xctx.strokeStyle = "#5eb1ff"; xctx.lineWidth = 1.6; xctx.beginPath();
+  for (let E = emin; E <= emax; E++) {
+    const s = key ? duane(E, key) : duane(E, XS.DDn) + duane(E, XS.DDp);
+    const x = X(E), y = Y(s);
+    E === emin ? xctx.moveTo(x, y) : xctx.lineTo(x, y);
+  }
+  xctx.stroke();
+  const sNow = PHY.sigmaShown;
+  xctx.fillStyle = "#ffd166"; xctx.beginPath(); xctx.arc(X(S.V), Y(sNow), 4, 0, 7); xctx.fill();
+}
+
+// ---------- Particle visualization (illustrative) ----------
+const cv = $("chamber"), ctx = cv.getContext("2d");
+const CX = cv.width / 2, CY = cv.height / 2;
+const N_IONS = 110;
+const ions = [], flashes = [], neutronsFx = [];
+
+function chamberPx() { return 90 + (S.R - 5) / 35 * 190; }   // 90..280 px
+function cathodePx() { return chamberPx() * S.rcPct / 100; }
+
+function spawnIon() {
+  const a = Math.random() * Math.PI * 2, R = chamberPx() * (0.88 + Math.random() * 0.08);
+  return { x: CX + R * Math.cos(a), y: CY + R * Math.sin(a),
+           vx: (Math.random() - .5) * .35, vy: (Math.random() - .5) * .35, prevInside: false };
+}
+for (let i = 0; i < N_IONS; i++) ions.push(spawnIon());
+
+function step() {
+  const Rp = chamberPx(), rc = cathodePx();
+  const accel = 9 * (S.V / 40);                 // visual scaling with voltage
+  // visual fusion frequency: log-map real rate (1e2..1e12 /s) to 0..~0.9 events/frame
+  const evPerFrame = Math.max(0, (Math.log10(Math.max(PHY.neut + PHY.fus, 1)) - 2)) * 0.09;
+  const lossPerCross = (1 - S.trans / 100) * 2.2; // exaggerated so grid losses are visible
+
+  for (const p of ions) {
+    let dx = p.x - CX, dy = p.y - CY, r = Math.hypot(dx, dy) || 1e-6;
+    if (r > rc) { const a = accel * (rc * rc) / (r * r); p.vx -= a * dx / r; p.vy -= a * dy / r; }
+    p.x += p.vx; p.y += p.vy;
+    dx = p.x - CX; dy = p.y - CY; r = Math.hypot(dx, dy);
+    const inside = r < rc;
+    if (inside !== p.prevInside) {              // crossed the grid
+      p.prevInside = inside;
+      if (Math.random() < lossPerCross) {
+        flashes.push({ x: p.x, y: p.y, t: 14, c: "255,107,107" });
+        Object.assign(p, spawnIon()); p.prevInside = false; continue;
+      }
+    }
+    if (inside && Math.random() < evPerFrame / N_IONS * 8) {   // fusion!
+      flashes.push({ x: p.x, y: p.y, t: 22, c: "255,209,102" });
+      const a = Math.random() * Math.PI * 2;
+      neutronsFx.push({ x: p.x, y: p.y, vx: 6 * Math.cos(a), vy: 6 * Math.sin(a), t: 70 });
+      Object.assign(p, spawnIon()); p.prevInside = false; continue;
+    }
+    if (r > Rp) {                                // wall: respawn
+      Object.assign(p, spawnIon()); p.prevInside = false;
+    }
+  }
+}
+
+function draw() {
+  ctx.fillStyle = "rgba(5,7,12,0.42)"; ctx.fillRect(0, 0, cv.width, cv.height);
+  const Rp = chamberPx(), rc = cathodePx();
+  // chamber wall (anode)
+  ctx.strokeStyle = "#3a465f"; ctx.lineWidth = 3;
+  ctx.beginPath(); ctx.arc(CX, CY, Rp, 0, 7); ctx.stroke();
+  // cathode grid
+  ctx.strokeStyle = "rgba(255,107,107,0.75)"; ctx.lineWidth = 1.2;
+  ctx.beginPath(); ctx.arc(CX, CY, rc, 0, 7); ctx.stroke();
+  ctx.setLineDash([3, 6]);
+  ctx.beginPath(); ctx.arc(CX, CY, rc * 0.72, 0, 7); ctx.stroke();
+  ctx.setLineDash([]);
+  // core glow scaled to output
+  const glow = Math.min(1, Math.max(0, (Math.log10(Math.max(PHY.fus, 1)) - 2) / 9));
+  if (glow > 0) {
+    const g = ctx.createRadialGradient(CX, CY, 0, CX, CY, rc);
+    g.addColorStop(0, `rgba(160,190,255,${0.35 * glow})`); g.addColorStop(1, "rgba(160,190,255,0)");
+    ctx.fillStyle = g; ctx.beginPath(); ctx.arc(CX, CY, rc, 0, 7); ctx.fill();
+  }
+  // ions colored by speed
+  for (const p of ions) {
+    const sp = Math.min(1, Math.hypot(p.vx, p.vy) / 7);
+    ctx.fillStyle = `rgb(${110 + 145 * sp},${180 + 60 * sp},255)`;
+    ctx.beginPath(); ctx.arc(p.x, p.y, 1.8, 0, 7); ctx.fill();
+  }
+  // neutrons: straight lines, ignore all fields
+  for (let i = neutronsFx.length - 1; i >= 0; i--) {
+    const n = neutronsFx[i];
+    n.x += n.vx; n.y += n.vy; n.t--;
+    ctx.strokeStyle = `rgba(100,255,218,${n.t / 70})`; ctx.lineWidth = 1.5;
+    ctx.beginPath(); ctx.moveTo(n.x - n.vx * 2.5, n.y - n.vy * 2.5); ctx.lineTo(n.x, n.y); ctx.stroke();
+    if (n.t <= 0) neutronsFx.splice(i, 1);
+  }
+  // flashes
+  for (let i = flashes.length - 1; i >= 0; i--) {
+    const f = flashes[i]; f.t--;
+    ctx.fillStyle = `rgba(${f.c},${f.t / 22})`;
+    ctx.beginPath(); ctx.arc(f.x, f.y, (22 - f.t) * 0.55 + 2, 0, 7); ctx.fill();
+    if (f.t <= 0) flashes.splice(i, 1);
+  }
+}
+
+// ---------- UI wiring (last, so every dependency above is initialized) ----------
+const controls = [
+  ["voltage", "vVal", v => v + " kV", v => S.V = +v],
+  ["current", "iVal", v => v + " mA", v => S.I = +v],
+  ["pressure", "pVal", v => v + " mTorr", v => S.P = +v],
+  ["radius", "rVal", v => v + " cm", v => S.R = +v],
+  ["cathode", "rcVal", v => v + " %", v => S.rcPct = +v],
+  ["transparency", "tVal", v => v + " %", v => S.trans = +v],
+];
+for (const [id, lab, fmt, set] of controls) {
+  const el = $(id);
+  const update = () => { set(el.value); $(lab).textContent = fmt(el.value); refresh(); };
+  el.addEventListener("input", update); update();
+}
+$("fuel").addEventListener("change", e => { S.fuel = e.target.value; refresh(); });
+
+(function loop() { step(); draw(); requestAnimationFrame(loop); })();
+refresh();
+</script>
+</body>
+</html>
